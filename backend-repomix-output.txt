@@ -1,0 +1,986 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+
+Additional Info:
+----------------
+
+================================================================
+Directory Structure
+================================================================
+config/db.js
+controllers/postController.js
+controllers/userController.js
+index.js
+models/postModel.js
+models/userModel.js
+note.md
+package.json
+routes/postRoute.js
+routes/userRoute.js
+
+================================================================
+Files
+================================================================
+
+================
+File: config/db.js
+================
+const db = require('mysql2');
+
+const connexion = db.createConnection({
+    host      : process.env.DB_HOST,
+    database  : process.env.DATABASE,
+    port      : process.env.DB_PORT,
+    user      : process.env.DB_USER,
+    password  : process.env.DB_PASSWORD
+});
+
+connexion.connect((error) => {
+    if(error){
+        console.log("erreur connexion avec la base de donnees", error);
+        return;
+    }
+    console.log("connexion avec la base de donnees etablie...");
+});
+
+module.exports = connexion;
+
+================
+File: controllers/postController.js
+================
+const jwt = require('jsonwebtoken');
+const postModel = require('../models/postModel');
+const { request, response } = require('express');
+const multer = require('multer');
+
+// Configurer Multer pour la gestion des images
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, './uploads/'); // Enregistrer l'image dans le dossier 'uploads'
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname); // Utiliser un nom de fichier unique basé sur le timestamp
+    }
+});
+
+const upload = multer({ storage: storage });
+
+// Ajouter un post avec une image et un lien
+const addPost = (request, response) => {
+    // Télécharger l'image d'abord avec multer
+    upload.single('image')(request, response, (err) => {
+        if (err) {
+            return response.status(500).send({ message: 'Erreur lors du téléchargement de l\'image' });
+        }
+
+        // Récupérer les autres données du post (titre, description, lien)
+        let { titre, description, link } = request.body;
+        // Vérifier si une image a été téléchargée et récupérer son chemin
+        let image = request.file ? `uploads/${request.file.filename}` : null;
+
+        console.log(request.body)
+        // Vérifier si le token est inclus dans l'entête de la requête
+        let tokenIsInclude = request.headers.authorization;
+        if (!tokenIsInclude) {
+            return response.send("Le token n'est pas présent. Veuillez vous connecter pour obtenir votre token");
+        }
+
+        let transform = tokenIsInclude.split(' ');
+        let token = transform[1];
+
+        // Vérifier la validité du token
+        jwt.verify(token, process.env.SECRET_KEY, (err, result) => {
+            if (err) {
+                return response.send("Le token n'est pas valide ou il est expiré");
+            }
+
+            // Si le token est valide, on extrait l'ID de l'utilisateur
+            let userId = result.userId;
+
+            // Sauvegarder le post dans la base de données
+            postModel.savePost([titre, description, userId, image, link], (e, r) => {
+                if (e) {
+                    return response.send("Erreur lors de l'insertion du post");
+                }
+                return response.send({ "message": "Post ajouté avec succès" });
+            });
+        });
+    });
+};
+
+// recuperer un post via son identifiant
+const getPost = (request, response) => {
+    const postId = request.params.id; // Fix: Use 'request' instead of 'req'
+    const token = request.headers.authorization?.split(' ')[1];
+
+    let userId = null;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            userId = decoded.id; // Assuming token payload has 'id'
+        } catch (err) {
+            console.error('Invalid token:', err);
+        }
+    }
+
+    postModel.getPostById(postId, userId, (err, result) => {
+        if (err) {
+            return response.status(500).json({ error: 'Database error' }); // Fix: Use 'response' instead of 'res'
+        }
+        if (!result) {
+            return response.status(404).json({ error: 'Post not found' }); // Fix: Use 'response' instead of 'res'
+        }
+        response.json(result); // Fix: Use 'response' instead of 'res'
+    });
+};
+
+
+// recuperer tous les posts
+const getAllPosts = (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1]; // Extract Bearer token
+    let userId = null;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            userId = decoded.id; // Assuming your JWT payload has 'id'
+        } catch (err) {
+            console.error('Invalid token:', err);
+        }
+    }
+    postModel.getAllPosts(userId, (err, result) => {
+        if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        res.json({ list: result });
+    });
+};
+
+// methode pour supprimer un post
+const deletePost = (request, response) => {
+    let id =request.params.id;
+
+    postModel.deletePost(id, (error, result) => {
+        if(error){
+            response.send({"message":"erreur interne"});
+            return;
+        }
+        response.send({message: "Post supprime"});
+    })
+}
+
+// methode pour la modification d'un post
+const updatePost = (request, response) => {
+    upload.single("image")(request, response, (err) => {
+        if (err) {
+            return response.status(500).send({ message: "Erreur lors du téléchargement de l'image" });
+        }
+
+        let { titre, description, link } = request.body;
+        let id = Number(request.body.id); // Convert ID to a number
+        let image = request.file ? `uploads/${request.file.filename}` : '';
+
+        if (!link) link = '';
+
+        console.log("Data types:", {
+            id: typeof request.body.id,
+            titre: typeof request.body.titre,
+            description: typeof request.body.description,
+            image: typeof image,
+            link: typeof link
+          });
+
+          console.log(request.body);
+
+
+        if (isNaN(id) || id <= 0) {
+            return response.status(400).send({ message: "ID invalide" });
+        }
+
+        console.log("Request body:", request.body);
+        
+        // Vérifier si le token est présent
+        let tokenIsInclude = request.headers.authorization;
+        if (!tokenIsInclude) {
+            return response.status(401).send("Le token n'est pas présent. Veuillez vous connecter.");
+        }
+
+        let token = tokenIsInclude.split(" ")[1];
+
+        jwt.verify(token, process.env.SECRET_KEY, (err, result) => {
+            if (err) {
+                return response.status(401).send("Le token n'est pas valide ou expiré.");
+            }
+
+            // Vérifier si l'utilisateur est bien le propriétaire du post
+            postModel.getPostById(id, result.userId, (err, res) => {
+                if (err || res.length === 0) {
+                    return response.status(404).send("Post introuvable.");
+                }
+
+                let post = res;
+
+                console.log(post);
+                if (post.userId !== result.userId) {
+                    return response.status(403).send("Vous n'avez pas le droit de modifier ce post.");
+                }
+
+                // Si pas de nouvelle image, garder l'ancienne
+                if (!image) {
+                    image = post.image;
+                }
+
+                /// Ensure values are valid before updating
+                if (typeof titre !== "string" || typeof description !== "string" || (link !== null && typeof link !== "string")) {
+                    return response.status(400).send({ message: "Titre, description et link doivent être des chaînes de caractères." });
+                }
+
+                console.log("Updating post with values:", [titre, description, image, link, id]);
+
+                // Mettre à jour le post
+                postModel.updatePost([titre, description, image, link, id], (e, r) => {
+                    if (e) {
+                        console.error("SQL Error:", e);
+                        return response.status(500).send("Erreur lors de la mise à jour.");
+                    }
+                    response.send({ message: "Post mis à jour avec succès" });
+                });
+            });
+        });
+    });
+};
+
+
+// methode pour recuperer la liste des posts d'un utilisateur
+const getUserPost = (request, response) => {
+    let token = request.headers.authorization;
+    console.log(token + ' ' + token.split(" ")[1]);
+    token = token.split(" ")[1];
+    jwt.verify(token, process.env.SECRET_KEY, (err, result) => {
+        if(err){
+            response.send({"message":"le token n'est pas valide ou expire"});
+            return;
+        }else{
+            postModel.getUserPost(result.userId, (err, res) => {
+                if(err){
+                    response.send({"message":"erreur interne"});
+                    return;
+                }
+                response.send(res);
+            })
+        }
+    })
+}
+
+// Middleware to get user ID from token
+const getUserIdFromToken = (request) => {
+    let token = request.headers.authorization;
+    if (!token) return null;
+    token = token.split(" ")[1];
+
+    try {
+        let decoded = jwt.verify(token, process.env.SECRET_KEY);
+        return decoded.userId;
+    } catch (err) {
+        return null;
+    }
+};
+
+// Recuperer les likes d'un post
+const getLike = (request, response) => {
+    const userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    postModel.getLike(userId, (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        response.send(res);
+    });
+}
+
+// ajouter un like
+const likePost = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { postId } = request.body;
+    postModel.addLike([userId, postId], (err, res) => {
+        if (err) {
+            console.log(err);
+            response.send({ "message": err });
+            return;
+        }
+        response.send({ "message": "Post liké avec succès" });
+    });
+};
+
+// supprimer un like
+const unlikePost = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { postId } = request.body;
+    postModel.removeLike([userId, postId], (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        response.send({ "message": "Like supprimé" });
+    });
+};
+
+// ajouter un post aux favoris
+const favouritePost = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { postId } = request.body;
+    postModel.addFavourite([userId, postId], (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        response.send({ "message": "Post ajouté aux favoris" });
+    });
+};
+
+// supprimer un post des favoris
+const unfavouritePost = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { postId } = request.body;
+    postModel.removeFavourite([userId, postId], (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        response.send({ "message": "Post retiré des favoris" });
+    });
+};
+
+// ajouter un commentaire
+const addComment = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { postId, commentaire } = request.body;
+    // console.log('addComment - Input:', { userId, postId, commentaire }); // Log inputs
+
+    postModel.addComment([userId, postId, commentaire], (err, res) => {
+        if (err) {
+            console.error('addComment - Database Error:', err); // Log the error
+            response.send({ "message": "Erreur interne", "error": err.message });
+            return;
+        }
+        response.send({ "message": "Commentaire ajouté" });
+    });
+};
+
+// modifier un commentaire
+const updateComment = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { commentId, commentaire } = request.body;
+    postModel.updateComment([commentaire, commentId, userId], (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        if (res.affectedRows === 0) {
+            response.send({ "message": "Modification refusée. Soit le commentaire n'existe pas, soit vous n'êtes pas son auteur" });
+            return;
+        }
+        response.send({ "message": "Commentaire modifié avec succès" });
+    });
+};
+
+// supprimer un commentaire
+const deleteComment = (request, response) => {
+    let userId = getUserIdFromToken(request);
+    if (!userId) {
+        response.send({ "message": "Token invalide ou expiré" });
+        return;
+    }
+
+    let { commentId } = request.body;
+    postModel.deleteComment([commentId, userId], (err, res) => {
+        if (err) {
+            response.send({ "message": "Erreur interne" });
+            return;
+        }
+        if (res.affectedRows === 0) {
+            response.send({ "message": "Suppression refusée. Soit le commentaire n'existe pas, soit vous n'êtes pas son auteur" });
+            return;
+        }
+        response.send({ "message": "Commentaire supprimé avec succès" });
+    });
+};
+
+// recuperer les commentaires d'un post
+const getPostComments = (request, response) => {
+    let postId = request.params.postId;
+    postModel.getCommentsByPost(postId, (err, res) => {
+        if (err) {
+            console.error('Database Error:', err);  // Log the error
+            response.status(500).send({ "message": "Erreur interne" });
+            return;
+        }
+        if (res.length === 0) {
+            response.send({ "message": "No comments found" });
+            return;
+        }
+        response.send(res);
+    });
+};
+
+
+module.exports = {
+    addPost,
+    getPost,
+    getAllPosts,
+    deletePost,
+    updatePost,
+    getUserPost,
+    getLike,
+    likePost,
+    unlikePost,
+    favouritePost,
+    unfavouritePost,
+    addComment,
+    updateComment,
+    deleteComment,
+    getPostComments
+}
+
+================
+File: controllers/userController.js
+================
+const bcrypt = require("bcryptjs");
+const jwt = require('jsonwebtoken');
+const userModel = require('../models/userModel');
+
+// Fonction d'inscription
+const inscription = async (request, response) => {
+    // récupération des données
+    let { nom, prenom, email, password } = request.body;
+
+    if (nom == "" || prenom == "" || email == "" || password == "") {
+        return response.status(400).send({ message: "Veuillez remplir tous les champs" });
+    }
+
+    // validation de l'email avec une regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return response.status(400).send({ message: "Email invalide" });
+    }
+
+    // vérifier si l'email existe déjà dans la base de données
+    userModel.checkEmailExists(email, (err, result) => {
+        if (err) {
+            return response.status(500).send({ message: "Erreur lors de la vérification de l'email" });
+        }
+        if (result.length > 0) {
+            return response.status(400).send({ message: "Email déjà utilisé" });
+        }
+
+        // crypter le mot de passe
+        bcrypt.hash(password, 5, (err, hashedPassword) => {
+            if (err) {
+                return response.status(500).send({ message: "Erreur lors du hashage du mot de passe" });
+            }
+
+            let values = [nom, prenom, email, hashedPassword];
+            // appel de la méthode saveUser définie dans le userModel
+            userModel.saveUser(values, (err, result) => {
+                if (err) {
+                    return response.status(500).send({ message: "Erreur lors de l'insertion" });
+                }
+                response.status(201).send({ message: "Inscription réalisée", id: result.insertId });
+            });
+        });
+    });
+}
+
+// Fonction de connexion
+const connexion = (request, response) => {
+    let { email, password } = request.body;
+
+    if (!email || !password) {
+        return response.status(400).send({ message: "Veuillez fournir un email et un mot de passe" });
+    }
+
+    userModel.login(email, async (err, result) => {
+        if (err) {
+            return response.status(500).send({ message: "Erreur interne au serveur" });
+        }
+        if (result.length != 0) {
+            let user = result[0];
+            let passwordIsValid = await bcrypt.compare(password, user.password);
+            if (!passwordIsValid) {
+                return response.status(404).send({ message: "Email ou mot de passe incorrect" });
+            }
+
+            // génération du token
+            let token = jwt.sign(
+                { userId: user.id, email: user.email },
+                process.env.SECRET_KEY,
+                { expiresIn: "2h" }
+            );
+            return response.send({ message: "Connexion réussie", data: token });
+        } else {
+            return response.status(404).send({ message: "Email ou mot de passe incorrect" });
+        }
+    });
+}
+
+module.exports = {
+    inscription,
+    connexion
+};
+
+================
+File: index.js
+================
+// Importation des modules requis
+const express = require('express'); // Framework Express
+const path = require('path');
+const cors = require('cors'); // CORS pour le partage de ressources entre origines
+const dotenv = require('dotenv'); // Charger les variables d'environnement
+const UserRoute = require('./routes/userRoute');
+const PostRoute = require('./routes/postRoute');
+
+// Charger les variables d'environnement depuis le fichier .env
+dotenv.config();
+
+// Création de l'instance de l'application Express
+const app = express();
+
+// Serve static files from the 'uploads' directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Middleware
+app.use(express.json()); // Parser automatiquement les requêtes JSON
+app.use(cors()); // Activer CORS pour toutes les routes
+
+// Routes
+app.use('/user', UserRoute); // Routes utilisateur
+app.use('/post', PostRoute); // Routes des posts
+
+// Route par défaut (pour les tests ou futures extensions)
+app.get('/', (req, res) => {
+    res.send('Bienvenue sur l\'API Blog');
+});
+
+// Middleware global pour la gestion des erreurs (optionnel mais recommandé)
+app.use((err, req, res, next) => {
+    console.error(err.stack); // Log l'erreur pour le débogage
+    res.status(500).send({ message: 'Quelque chose a mal tourné sur le serveur.' });
+});
+
+// Définir le port (depuis une variable d'environnement, avec une valeur par défaut à 3000)
+const PORT = process.env.PORT || 3000;
+
+// Démarrer le serveur
+app.listen(PORT, () => {
+    console.log(`Serveur en marche sur le port ${PORT}`);
+});
+
+================
+File: models/postModel.js
+================
+const environement = require('dotenv');
+environement.config();
+const connexion = require('../config/db');
+// methode pour sauvegarder un post avec image et lien
+const savePost = (values, callback) => {
+    let req = "INSERT INTO posts (titre, description, userId, image, link) VALUES (?, ?, ?, ?, ?)";
+    connexion.query(req, values, (err, res) => {
+        callback(err, res);
+    });
+}
+// methode pour recuperer un post via son id
+const getPostById = (id, userId, callback) => {
+    let req = `
+        SELECT 
+            users.nom, 
+            users.prenom, 
+            posts.titre, 
+            posts.description, 
+            posts.id, 
+            posts.image, 
+            posts.link, 
+            posts.createdAt, 
+            COUNT(likes.postId) AS likeCount, 
+            MAX(CASE WHEN likes.userId = ? THEN 1 ELSE 0 END) AS isLikedByUser, 
+            posts.userId 
+        FROM 
+            users 
+        INNER JOIN 
+            posts ON users.id = posts.userId 
+        LEFT JOIN 
+            likes ON posts.id = likes.postId 
+        WHERE 
+            posts.id = ? 
+        GROUP BY 
+            posts.id, users.nom, users.prenom, posts.titre, posts.description, posts.image, posts.link, posts.createdAt, posts.userId
+    `;
+    connexion.query(req, [userId || null, id], (err, res) => {
+        if (err) {
+            console.error('Error fetching post by ID:', err);
+            callback(err, null);
+        } else {
+            callback(null, res[0]);
+        }
+    });
+};
+
+// methode pour recuperer la liste des posts
+const getAllPosts = (userId, callback) => {
+    let sql = `
+        SELECT 
+            posts.id, 
+            posts.titre, 
+            posts.description, 
+            posts.image, 
+            posts.link, 
+            posts.createdAt, 
+            users.nom, 
+            users.prenom, 
+            COUNT(likes.postId) AS likeCount,
+            MAX(CASE WHEN likes.userId = ? THEN 1 ELSE 0 END) AS isLikedByUser
+        FROM 
+            posts 
+        JOIN 
+            users ON posts.userId = users.id 
+        LEFT JOIN 
+            likes ON posts.id = likes.postId 
+        GROUP BY 
+            posts.id, posts.titre, posts.description, posts.image, posts.link, posts.createdAt, users.nom, users.prenom 
+        ORDER BY 
+            posts.createdAt DESC
+    `;
+    connexion.query(sql, [userId || null], (err, res) => {
+        callback(err, res);
+    });
+};
+
+// methode pour supprimer un post
+const deletePost = (id, callback) => {
+    let sql = "DELETE FROM posts WHERE id = ?";
+    connexion.query(sql, [id], (err, res) => {
+        callback(err, res);
+    })
+}
+
+// méthode pour modifier un post avec image et lien
+const updatePost = (values, callback) => {
+  
+    let sql =
+      "UPDATE posts SET titre = ?, description = ?, image = ?, link = ? WHERE id = ?";
+    connexion.query(sql, values , (err, res) => {
+      if (err) {
+        console.error("SQL Error:", err);
+      }
+      callback(err, res);
+    });
+  };
+
+
+// recuperation de la liste des posts d'un utilisateur
+const getUserPost = (id, callback) => {
+    let sql = "SELECT * FROM posts WHERE userId = ? ORDER BY posts.createdAt DESC";
+    connexion.query(sql, id, (err, res) => {
+        callback(err, res);
+    })
+}
+//recuperer les likes
+const getLike = (userId, callback) => {
+    let sql = "SELECT postId FROM likes WHERE userId = ?"
+    connexion.query(sql, userId, (err, res) => {
+        callback(err, res)
+    });
+}
+
+// ajouter un like
+const addLike = (values, callback) => {
+    let sql = "INSERT INTO likes (userId, postId) VALUES (?, ?)";
+    // let sql = "UPDATE posts set isLiked = ? where postId = ?"
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+}
+
+// supprimer un like
+const removeLike = (values, callback) => {
+    let sql = "DELETE FROM likes WHERE userId = ? AND postId = ?";
+    // let sql = "UPDATE posts set isLiked = ? where postId = ?"
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+}
+
+// ajouter un post aux favoris
+const addFavourite = (values, callback) => {
+    let sql = "INSERT INTO favourites (userId, postId) VALUES (?, ?)";
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+}
+
+// supprimer un post des favoris
+const removeFavourite = (values, callback) => {
+    let sql = "DELETE FROM favourites WHERE userId = ? AND postId = ?";
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+}
+
+// ajouter un commentaire
+const addComment = (values, callback) => {
+    let sql = "INSERT INTO comments (userId, postId, commentaire) VALUES (?, ?, ?)";
+    connexion.query(sql, values, (err, res) => {
+      if (err) {
+        console.error('addComment - Query Error:', err);
+        return callback(err, null);
+      }
+      // Fetch the newly created comment
+      const newCommentId = res.insertId;
+      let fetchSql = `
+        SELECT comments.id, users.nom, users.prenom, comments.commentaire, comments.createdAt 
+        FROM comments 
+        JOIN users ON comments.userId = users.id 
+        WHERE comments.id = ?
+      `;
+      connexion.query(fetchSql, [newCommentId], (fetchErr, fetchRes) => {
+        if (fetchErr) {
+          console.error('Error fetching new comment:', fetchErr);
+          return callback(fetchErr, null);
+        }
+        callback(null, { message: 'Comment added successfully', comment: fetchRes[0] });
+      });
+    });
+  };
+
+// modifier un commentaire
+const updateComment = (values, callback) => {
+    let sql = "UPDATE comments SET commentaire = ? WHERE id = ? AND userId = ?";
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+};
+
+// supprimer un commentaire
+const deleteComment = (values, callback) => {
+    let sql = "DELETE FROM comments WHERE id = ? AND userId = ?";
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+};
+
+// recuperer les commentaires d'un post
+const getCommentsByPost = (postId, callback) => {
+    let sql = "SELECT comments.id, users.nom, users.prenom, comments.commentaire, comments.createdAt FROM comments INNER JOIN users ON users.id = comments.userId WHERE comments.postId = ? ORDER BY comments.createdAt DESC";
+    connexion.query(sql, [postId], (err, res) => {
+        callback(err, res);
+    });
+};
+
+module.exports = {
+    savePost,
+    getPostById,
+    getAllPosts,
+    deletePost,
+    updatePost,
+    getUserPost,
+    getLike,
+    addLike,
+    removeLike,
+    addFavourite,
+    removeFavourite,
+    addComment,
+    updateComment,
+    deleteComment,
+    getCommentsByPost
+};
+
+================
+File: models/userModel.js
+================
+const environement = require('dotenv');
+environement.config();
+const connexion = require('../config/db');
+
+// enregistrer un user
+const saveUser = (values, callback) => {
+    let req = `INSERT INTO users (nom, prenom, email, password) VALUES (?,?,?,?)`;
+    connexion.query(req, values, (err, res) => {
+        callback(err, res)
+    });
+}
+// connecter un user
+const login = (email, callback) => {
+    let sql = "SELECT * FROM users WHERE email = ?";
+    connexion.query(sql, [email], (err, res) => {
+        callback(err, res)
+    });
+}
+
+// vérifier si l'email existe déjà
+const checkEmailExists = (email, callback) => {
+    let sql = "SELECT * FROM users WHERE email = ?";
+    connexion.query(sql, [email], (err, res) => {
+        callback(err, res);
+    });
+}
+
+module.exports = {
+    saveUser,
+    login,
+    checkEmailExists
+};
+
+================
+File: note.md
+================
+Pour installer nodemon en global c a d une bonne fois pour toute utiliser la commande :
+npm install -g nodemon
+Pour installer nodemon uniquement pour un projet utiliser la commande:
+npm install --save-dev nodemon
+
+pour lance le serveur avec nodemon tapre: npx nodemon index.js
+
+================
+File: package.json
+================
+{
+  "name": "mon_app_node",
+  "version": "1.0.0",
+  "description": "rien de particulier",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.10.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
+
+================
+File: routes/postRoute.js
+================
+const express = require('express');
+const PostRoute = express.Router();
+const postController = require('../controllers/postController');
+
+PostRoute.post('/add',  postController.addPost);
+PostRoute.get('/getpost/:id', postController.getPost);
+PostRoute.get('/getAll', postController.getAllPosts);
+PostRoute.get('/delete/:id', postController.deletePost);
+PostRoute.put('/update', postController.updatePost);
+PostRoute.get('/postUser', postController.getUserPost);
+PostRoute.get('/getlike', postController.getLike);
+PostRoute.post('/like', postController.likePost);
+PostRoute.post('/unlike', postController.unlikePost);
+PostRoute.post('/favourite', postController.favouritePost);
+PostRoute.post('/unfavourite', postController.unfavouritePost);
+PostRoute.post('/comment', postController.addComment);
+PostRoute.put('/comment', postController.updateComment);
+PostRoute.delete('/comment', postController.deleteComment);
+PostRoute.get('/comments/:postId', postController.getPostComments);
+
+module.exports = PostRoute;
+
+================
+File: routes/userRoute.js
+================
+const express = require('express');
+const userRoute = express.Router();
+const UserController = require('../controllers/userController');
+
+// Route pour l'inscription
+userRoute.post('/register', UserController.inscription);
+
+// Route pour la connexion
+userRoute.post('/login', UserController.connexion);
+
+module.exports = userRoute;
+
+
+
+================================================================
+End of Codebase
+================================================================
