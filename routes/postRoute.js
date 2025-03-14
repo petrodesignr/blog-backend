@@ -17,5 +17,10 @@ PostRoute.post('/comment', postController.addComment);
 PostRoute.put('/comment', postController.updateComment);
 PostRoute.delete('/comment', postController.deleteComment);
 PostRoute.get('/comments/:postId', postController.getPostComments);
+PostRoute.put('/state/:state/:postId', postController.changePostStatus);
+
+
+
+PostRoute.get('/active', postController.getAllActivePosts);
 
 module.exports = PostRoute;

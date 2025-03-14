@@ -24,11 +24,10 @@ const addPost = (request, response) => {
         }
 
         // Récupérer les autres données du post (titre, description, lien)
-        let { titre, description, link } = request.body;
+        let { titre, description, link, state } = request.body; //pas de validation des données ici (Joi)
         // Vérifier si une image a été téléchargée et récupérer son chemin
         let image = request.file ? `uploads/${request.file.filename}` : null;
 
-        console.log(request.body)
         // Vérifier si le token est inclus dans l'entête de la requête
         let tokenIsInclude = request.headers.authorization;
         if (!tokenIsInclude) {
@@ -48,7 +47,7 @@ const addPost = (request, response) => {
             let userId = result.userId;
 
             // Sauvegarder le post dans la base de données
-            postModel.savePost([titre, description, userId, image, link], (e, r) => {
+            postModel.savePost([titre, description, userId, image, link, state], (e, r) => {
                 if (e) {
                     return response.send("Erreur lors de l'insertion du post");
                 }
@@ -84,6 +83,28 @@ const getPost = (request, response) => {
     });
 };
 
+//recuperer tout les postes
+
+const getAllActivePosts = (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1]; // Extract Bearer token
+    let userId = null;
+    let state = req.query.state;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            userId = decoded.id; // Assuming your JWT payload has 'id'
+        } catch (err) {
+            console.error('Invalid token:', err);
+        }
+    }
+    postModel.getAllActivePosts(userId, state, (err, result) => {
+        if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        res.json({ list: result });
+    });
+}
 
 // recuperer tous les posts
 const getAllPosts = (req, res) => {
@@ -126,28 +147,17 @@ const updatePost = (request, response) => {
             return response.status(500).send({ message: "Erreur lors du téléchargement de l'image" });
         }
 
-        let { titre, description, link } = request.body;
+        let { titre, description, link, state } = request.body;
         let id = Number(request.body.id); // Convert ID to a number
         let image = request.file ? `uploads/${request.file.filename}` : '';
 
         if (!link) link = '';
 
-        console.log("Data types:", {
-            id: typeof request.body.id,
-            titre: typeof request.body.titre,
-            description: typeof request.body.description,
-            image: typeof image,
-            link: typeof link
-          });
-
-          console.log(request.body);
 
 
         if (isNaN(id) || id <= 0) {
             return response.status(400).send({ message: "ID invalide" });
         }
-
-        console.log("Request body:", request.body);
         
         // Vérifier si le token est présent
         let tokenIsInclude = request.headers.authorization;
@@ -170,7 +180,6 @@ const updatePost = (request, response) => {
 
                 let post = res;
 
-                console.log(post);
                 if (post.userId !== result.userId) {
                     return response.status(403).send("Vous n'avez pas le droit de modifier ce post.");
                 }
@@ -185,10 +194,9 @@ const updatePost = (request, response) => {
                     return response.status(400).send({ message: "Titre, description et link doivent être des chaînes de caractères." });
                 }
 
-                console.log("Updating post with values:", [titre, description, image, link, id]);
 
                 // Mettre à jour le post
-                postModel.updatePost([titre, description, image, link, id], (e, r) => {
+                postModel.updatePost([titre, description, image, link, state, id], (e, r) => {
                     if (e) {
                         console.error("SQL Error:", e);
                         return response.status(500).send("Erreur lors de la mise à jour.");
@@ -204,7 +212,6 @@ const updatePost = (request, response) => {
 // methode pour recuperer la liste des posts d'un utilisateur
 const getUserPost = (request, response) => {
     let token = request.headers.authorization;
-    console.log(token + ' ' + token.split(" ")[1]);
     token = token.split(" ")[1];
     jwt.verify(token, process.env.SECRET_KEY, (err, result) => {
         if(err){
@@ -264,7 +271,6 @@ const likePost = (request, response) => {
     let { postId } = request.body;
     postModel.addLike([userId, postId], (err, res) => {
         if (err) {
-            console.log(err);
             response.send({ "message": err });
             return;
         }
@@ -335,7 +341,6 @@ const addComment = (request, response) => {
     }
 
     let { postId, commentaire } = request.body;
-    // console.log('addComment - Input:', { userId, postId, commentaire }); // Log inputs
 
     postModel.addComment([userId, postId, commentaire], (err, res) => {
         if (err) {
@@ -408,10 +413,30 @@ const getPostComments = (request, response) => {
     });
 };
 
+const changePostStatus = (req, response) => {
+    const state = req.params.state;
+    const postId = req.params.postId;
+
+    postModel.changePostStatus([state, postId], (err, res) => {
+        if (err) {
+            console.error('Database error: ', err);
+            response.status(500).send({'message': 'Cannot change state of post'});
+            return;
+        }
+        response.send(res);
+        return response;
+    });
+}
+
+//nouvelle avec idPost qui va passer son etat en validé
+
+//valider l'authentification avec le jwt verify comme au dessus et en vérifiant cette fois le result.role pour voir s'il vaut admin
+
 
 module.exports = {
     addPost,
     getPost,
+    getAllActivePosts,
     getAllPosts,
     deletePost,
     updatePost,
@@ -424,5 +449,6 @@ module.exports = {
     addComment,
     updateComment,
     deleteComment,
-    getPostComments
+    getPostComments,
+    changePostStatus
 }

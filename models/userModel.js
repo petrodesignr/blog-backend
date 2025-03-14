@@ -1,7 +1,7 @@
 const environement = require('dotenv');
 environement.config();
 const connexion = require('../config/db');
-
+//rajouter role
 // enregistrer un user
 const saveUser = (values, callback) => {
     let req = `INSERT INTO users (nom, prenom, email, password) VALUES (?,?,?,?)`;
@@ -25,8 +25,24 @@ const checkEmailExists = (email, callback) => {
     });
 }
 
+const makeadmin = (role, id, callback) => {
+    let sql = "UPDATE users SET role = ? WHERE id = ?"
+    connexion.query(sql, [role, id], (err, res) => {
+        callback(err, res);
+    })
+}
+
+const getAllUsers = (callback) => {
+    let sql = "SELECT id, nom, prenom, email, role FROM users"; // Fetch users without passwords
+    connexion.query(sql, (err, res) => {
+        callback(err, res);
+    });
+};
+
 module.exports = {
     saveUser,
     login,
-    checkEmailExists
+    checkEmailExists,
+    makeadmin,
+    getAllUsers
 };

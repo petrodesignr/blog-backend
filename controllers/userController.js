@@ -65,7 +65,7 @@ const connexion = (request, response) => {
 
             // génération du token
             let token = jwt.sign(
-                { userId: user.id, email: user.email },
+                { userId: user.id, email: user.email, role: user.role }, //rajouter le role dans le token
                 process.env.SECRET_KEY,
                 { expiresIn: "2h" }
             );
@@ -76,7 +76,38 @@ const connexion = (request, response) => {
     });
 }
 
+// to make an admin 
+const promoteToAdmin = (req, res) => {
+    const { id, role } = req.body; // Assuming data comes from request body
+
+    if (!id || !role) {
+        return res.status(400).json({ message: "ID and Role are required." });
+    }
+
+    userModel.makeadmin(role, id, (err, result) => {
+        if (err) {
+            return res.status(500).json({ message: "Database error", error: err });
+        }
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "User not found." });
+        }
+        res.status(200).json({ message: "User role updated successfully." });
+    });
+};
+
+//to get all user
+const fetchAllUsers = (req, res) => {
+    userModel.getAllUsers((err, users) => {
+        if (err) {
+            return res.status(500).json({ message: "Database error", error: err });
+        }
+        res.status(200).json(users);
+    });
+};
+
 module.exports = {
     inscription,
-    connexion
+    connexion,
+    promoteToAdmin,
+    fetchAllUsers
 };

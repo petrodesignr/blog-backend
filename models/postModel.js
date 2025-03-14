@@ -1,9 +1,10 @@
 const environement = require('dotenv');
 environement.config();
 const connexion = require('../config/db');
+//rajouter etat
 // methode pour sauvegarder un post avec image et lien
 const savePost = (values, callback) => {
-    let req = "INSERT INTO posts (titre, description, userId, image, link) VALUES (?, ?, ?, ?, ?)";
+    let req = "INSERT INTO posts (titre, description, userId, image, link, state) VALUES (?, ?, ?, ?, ?, ?)";
     connexion.query(req, values, (err, res) => {
         callback(err, res);
     });
@@ -44,6 +45,35 @@ const getPostById = (id, userId, callback) => {
     });
 };
 
+const getAllActivePosts = (userId, state, callback) => {
+    let sql = `SELECT 
+            posts.id, 
+            posts.titre, 
+            posts.description, 
+            posts.image, 
+            posts.link, 
+            posts.createdAt, 
+            users.nom, 
+            users.prenom, 
+            COUNT(likes.postId) AS likeCount,
+            MAX(CASE WHEN likes.userId = ? THEN 1 ELSE 0 END) AS isLikedByUser
+        FROM 
+            posts 
+        JOIN 
+            users ON posts.userId = users.id 
+        LEFT JOIN 
+            likes ON posts.id = likes.postId 
+        WHERE posts.state = ?
+        GROUP BY 
+            posts.id, posts.titre, posts.description, posts.image, posts.link, posts.createdAt, users.nom, users.prenom 
+        ORDER BY 
+            posts.createdAt DESC
+        `
+        connexion.query(sql, [userId || null, state], (err, res) => {
+            callback(err, res);
+        });
+}
+
 // methode pour recuperer la liste des posts
 const getAllPosts = (userId, callback) => {
     let sql = `
@@ -81,12 +111,13 @@ const deletePost = (id, callback) => {
         callback(err, res);
     })
 }
+//rajouter etat
 
 // méthode pour modifier un post avec image et lien
 const updatePost = (values, callback) => {
   
     let sql =
-      "UPDATE posts SET titre = ?, description = ?, image = ?, link = ? WHERE id = ?";
+      "UPDATE posts SET titre = ?, description = ?, image = ?, link = ?, state = ? WHERE id = ?";
     connexion.query(sql, values , (err, res) => {
       if (err) {
         console.error("SQL Error:", err);
@@ -195,9 +226,17 @@ const getCommentsByPost = (postId, callback) => {
     });
 };
 
+const changePostStatus = (values, callback) => {
+    const sql = "UPDATE posts SET state = ? WHERE id = ?";
+    connexion.query(sql, values, (err, res) => {
+        callback(err, res);
+    });
+}
+
 module.exports = {
     savePost,
     getPostById,
+    getAllActivePosts,
     getAllPosts,
     deletePost,
     updatePost,
@@ -210,5 +249,6 @@ module.exports = {
     addComment,
     updateComment,
     deleteComment,
-    getCommentsByPost
+    getCommentsByPost,
+    changePostStatus
 };
